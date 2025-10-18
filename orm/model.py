@@ -1,11 +1,6 @@
-from .types import sql_to_python
+from .accorder import sql_to_python
 
-class ModelMeta(type):
-    def __new__(cls, name, bases, attrs):
-        new_cls = super().__new__(cls, name, bases, attrs)
-        return new_cls
-
-class Model(metaclass=ModelMeta):
+class Model():
     table_name: str = None
     columns: dict = {}
     db = None
@@ -20,3 +15,27 @@ class Model(metaclass=ModelMeta):
         elif create:
             for col in self.columns:
                 setattr(self, col, kwargs.get(col))
+
+    def save(self):
+        """Sauvegarde l'objet en base de données"""
+        if not self.db:
+            raise ValueError("Model non enregistré auprès d'un DBManager")
+        data = {c: getattr(self, c) for c in self.columns if hasattr(self, c)}
+        data_without_id = {k: v for k, v in data.items() if k != "id" and v is not None}
+        if not data_without_id:
+            raise ValueError("Aucune donnée à sauvegarder")
+        
+        if hasattr(self, "id") and self.id:
+            self.db.update(self.table_name, data, {"id": self.id}, self.columns)
+        else:
+            self.id = self.db.insert(self.table_name, data, self.columns)
+
+    def delete(self):
+        """Supprime l'objet de la base de données"""
+        if not self.db:
+            raise ValueError("Model non enregistré auprès d'un DBManager")
+        if not hasattr(self, "id") or not self.id:
+            raise ValueError("Objet non enregistré")
+        
+        self.db.delete(self.table_name, {"id": self.id})
+        self.id = None

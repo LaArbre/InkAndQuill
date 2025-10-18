@@ -2,7 +2,7 @@ import sqlite3
 import pymysql
 import json
 from datetime import datetime
-from .types import python_to_sql
+from .accorder import python_to_sql
 
 def init_log_table(log):
     query = """
@@ -11,7 +11,7 @@ def init_log_table(log):
         table_name TEXT,
         action TEXT,
         keys TEXT,
-        values TEXT,
+        values_text TEXT,  -- Changé 'values' en 'values_text'
         timestamp TEXT
     )
     """
@@ -20,7 +20,7 @@ def init_log_table(log):
 
 def record_history(log, table_name, action, keys, values):
     log["cursor"].execute("""
-        INSERT INTO history (table_name, action, keys, values, timestamp)
+        INSERT INTO history (table_name, action, keys, values_text, timestamp)
         VALUES (?, ?, ?, ?, ?)
     """, (
         table_name,
@@ -50,20 +50,29 @@ class Database:
 
         self.data["cursor"] = self.data["connect"].cursor()
 
-        # Logs toujours SQLite
+        # Logs
         self.log = {"connect": sqlite3.connect(kwargs.get("log_path", "logs.db"))}
         self.log["cursor"] = self.log["connect"].cursor()
         init_log_table(self.log)
 
     # --------------------- CRUD ---------------------
     def insert(self, table_name, data: dict, columns_type: dict):
-        sql_data = {k: python_to_sql(v, columns_type[k]) for k, v in data.items()}
-        keys = ", ".join(sql_data.keys())
+        filtered_data = {}
+        for k, v in data.items():
+            if k == "id" and v is None:
+                continue
+            filtered_data[k] = v
+        
+        if not filtered_data:
+            raise ValueError("Aucune donnée à insérer")
+        
+        sql_data = {k: python_to_sql(v, columns_type[k]) for k, v in filtered_data.items()}
+        keys = ", ".join([f'"{k}"' for k in sql_data.keys()])
         placeholders = ", ".join([self.placeholder] * len(sql_data))
         query = f'INSERT INTO "{table_name}" ({keys}) VALUES ({placeholders})'
         self.data["cursor"].execute(query, tuple(sql_data.values()))
         self.data["connect"].commit()
-        record_history(self.log, table_name, "INSERT", sql_data.keys(), sql_data)
+        record_history(self.log, table_name, "INSERT", list(sql_data.keys()), sql_data)
         return self.data["cursor"].lastrowid
 
     def update(self, table_name, data: dict, where: dict, columns_type: dict):
@@ -73,17 +82,20 @@ class Database:
         query = f'UPDATE "{table_name}" SET {set_clause} WHERE {where_clause}'
         self.data["cursor"].execute(query, tuple(sql_data.values()) + tuple(where.values()))
         self.data["connect"].commit()
-        record_history(self.log, table_name, "UPDATE", sql_data.keys(), sql_data)
+        record_history(self.log, table_name, "UPDATE", list(sql_data.keys()), sql_data)
 
     def delete(self, table_name, where: dict):
         where_clause = " AND ".join([f'"{k}" = {self.placeholder}' for k in where])
         query = f'DELETE FROM "{table_name}" WHERE {where_clause}'
         self.data["cursor"].execute(query, tuple(where.values()))
         self.data["connect"].commit()
-        record_history(self.log, table_name, "DELETE", where.keys(), where)
+        record_history(self.log, table_name, "DELETE", list(where.keys()), where)
 
     def select(self, table_name, columns=None, where=None):
-        column_part = "*" if not columns else ", ".join(columns)
+        if columns:
+            column_part = ", ".join([f'"{col}"' for col in columns])
+        else:
+            column_part = "*"
         where_clause = ""
         params = ()
         if where:
@@ -97,10 +109,10 @@ class Database:
     def create_table(self, table_name, columns: dict):
         col_defs = []
         if "id" not in columns:
-            col_defs.append("id INTEGER PRIMARY KEY AUTOINCREMENT")
+            col_defs.append('"id" INTEGER PRIMARY KEY AUTOINCREMENT')
         for col, col_type in columns.items():
             if col != "id":
-                col_defs.append(f"{col} {col_type}")
+                col_defs.append(f'"{col}" {col_type}')
         query = f'CREATE TABLE IF NOT EXISTS "{table_name}" ({", ".join(col_defs)})'
         self.data["cursor"].execute(query)
         self.data["connect"].commit()

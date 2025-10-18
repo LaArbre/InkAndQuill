@@ -1,5 +1,5 @@
 from .database import Database
-from .types import sql_to_python
+from .accorder import sql_to_python
 
 class DBManager:
     def __init__(self, path="local.db", log_path="logs.db"):
@@ -14,22 +14,6 @@ class DBManager:
             table_name=model_class.table_name,
             columns=model_class.columns
         )
-
-        def save(self):
-            data = {c: getattr(self, c) for c in self.columns}
-            if hasattr(self, "id") and self.id:
-                self.db.update(self.table_name, data, {"id": self.id}, self.columns)
-            else:
-                self.id = self.db.insert(self.table_name, data, self.columns)
-
-        def delete(self):
-            if not hasattr(self, "id") or not self.id:
-                raise ValueError("Objet non enregistré")
-            self.db.delete(self.table_name, {"id": self.id})
-            self.id = None
-
-        model_class.save = save
-        model_class.delete = delete
 
     def create(self, model_class, **kwargs):
         obj = model_class(**kwargs)
@@ -47,3 +31,6 @@ class DBManager:
 
     def close(self):
         self.db.close()
+
+# Instance globale
+manager = DBManager()
