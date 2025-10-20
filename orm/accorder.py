@@ -1,21 +1,23 @@
 from datetime import datetime
 
+
 def sql_to_python(value, col_type):
     if value is None:
         return None
-    if col_type == "INTEGER":
+    if "INTEGER" in col_type:
         return int(value)
-    elif col_type == "REAL":
+    elif "REAL" in col_type:
         return float(value)
-    elif col_type == "TEXT":
+    elif "TEXT" in col_type:
         return str(value)
-    elif col_type == "DATETIME":
+    elif "DATETIME" in col_type:
         return datetime.fromisoformat(value)
     return value
+
 
 def python_to_sql(value, col_type):
     if value is None:
         return None
-    if col_type == "DATETIME" and isinstance(value, datetime):
+    if "DATETIME" in col_type and isinstance(value, datetime):
         return value.isoformat()
     return value

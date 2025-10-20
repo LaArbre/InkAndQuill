@@ -1,26 +1,14 @@
 import sqlite3
 import pymysql
 import json
+import os
 from datetime import datetime
 from .accorder import python_to_sql
 
-def init_log_table(log):
-    query = """
-    CREATE TABLE IF NOT EXISTS history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        table_name TEXT,
-        action TEXT,
-        keys TEXT,
-        values_text TEXT,  -- Changé 'values' en 'values_text'
-        timestamp TEXT
-    )
-    """
-    log["cursor"].execute(query)
-    log["connect"].commit()
 
 def record_history(log, table_name, action, keys, values):
     log["cursor"].execute("""
-        INSERT INTO history (table_name, action, keys, values_text, timestamp)
+        INSERT INTO history (table_name, action, keys, text_values, timestamp)
         VALUES (?, ?, ?, ?, ?)
     """, (
         table_name,
@@ -31,43 +19,46 @@ def record_history(log, table_name, action, keys, values):
     ))
     log["connect"].commit()
 
+
 class Database:
-    def __init__(self, mysql_db=False, **kwargs):
-        if mysql_db:
+    """Gestionnaire bas-niveau des requêtes SQL."""
+
+    def __init__(self):
+        if os.getenv("DB_SQL", False):
             self.data = {
                 "connect": pymysql.connect(
-                    host=kwargs.get("host", "localhost"),
-                    user=kwargs.get("user", "root"),
-                    password=kwargs.get("password", ""),
-                    database=kwargs.get("database", ""),
+                    host=os.getenv("DB_HOST", "localhost"),
+                    user=os.getenv("DB_USER", "root"),
+                    password=os.getenv("DB_PASSWORD", ""),
+                    database=os.getenv("DB_NAME", ""),
                     charset="utf8mb4"
                 )
             }
             self.placeholder = "%s"
         else:
-            self.data = {"connect": sqlite3.connect(kwargs.get("path", "local.db"))}
+            self.data = {"connect": sqlite3.connect(os.getenv("DB_BASE_PATH", "local.db"))}
             self.placeholder = "?"
-
         self.data["cursor"] = self.data["connect"].cursor()
 
-        # Logs
-        self.log = {"connect": sqlite3.connect(kwargs.get("log_path", "logs.db"))}
+        # Journalisation
+        self.log = {"connect": sqlite3.connect(os.getenv("DB_LOG_PATH", "logs.db"))}
         self.log["cursor"] = self.log["connect"].cursor()
-        init_log_table(self.log)
+        self.log["cursor"].execute("""
+            CREATE TABLE IF NOT EXISTS history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                table_name TEXT,
+                action TEXT,
+                keys TEXT,
+                text_values TEXT,
+                timestamp TEXT
+            )
+        """)
+        self.log["connect"].commit()
 
     # --------------------- CRUD ---------------------
     def insert(self, table_name, data: dict, columns_type: dict):
-        filtered_data = {}
-        for k, v in data.items():
-            if k == "id" and v is None:
-                continue
-            filtered_data[k] = v
-        
-        if not filtered_data:
-            raise ValueError("Aucune donnée à insérer")
-        
-        sql_data = {k: python_to_sql(v, columns_type[k]) for k, v in filtered_data.items()}
-        keys = ", ".join([f'"{k}"' for k in sql_data.keys()])
+        sql_data = {k: python_to_sql(v, columns_type[k]) for k, v in data.items()}
+        keys = ", ".join([f'"{k}"' for k in sql_data])
         placeholders = ", ".join([self.placeholder] * len(sql_data))
         query = f'INSERT INTO "{table_name}" ({keys}) VALUES ({placeholders})'
         self.data["cursor"].execute(query, tuple(sql_data.values()))
@@ -92,10 +83,7 @@ class Database:
         record_history(self.log, table_name, "DELETE", list(where.keys()), where)
 
     def select(self, table_name, columns=None, where=None):
-        if columns:
-            column_part = ", ".join([f'"{col}"' for col in columns])
-        else:
-            column_part = "*"
+        column_part = ", ".join([f'"{c}"' for c in columns]) if columns else "*"
         where_clause = ""
         params = ()
         if where:
@@ -107,15 +95,15 @@ class Database:
         return self.data["cursor"].fetchall()
 
     def create_table(self, table_name, columns: dict):
-        col_defs = []
-        if "id" not in columns:
-            col_defs.append('"id" INTEGER PRIMARY KEY AUTOINCREMENT')
-        for col, col_type in columns.items():
-            if col != "id":
-                col_defs.append(f'"{col}" {col_type}')
+        col_defs = [f'"{col}" {typ}' for col, typ in columns.items()]
         query = f'CREATE TABLE IF NOT EXISTS "{table_name}" ({", ".join(col_defs)})'
         self.data["cursor"].execute(query)
         self.data["connect"].commit()
+
+    def table_exists(self, table_name):
+        query = "SELECT name FROM sqlite_master WHERE type='table' AND name=?"
+        self.data["cursor"].execute(query, (table_name,))
+        return self.data["cursor"].fetchone() is not None
 
     def close(self):
         self.data["connect"].close()

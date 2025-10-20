@@ -1,23 +1,18 @@
-import orm
+# models.py
+from orm import Model
 
-a = orm.manager
-
-class User(orm.Model):
-    table_name="Users"
-    columns = {
+class User(Model):
+    __columns__ = {
         "name": "TEXT",
-        "email": "TEXT"
+        "email": "TEXT",
+        "age": "INTEGER"
     }
 
-class Server(orm.Model):
-    table_name="Servers"
-    columns = {
-        "name": "TEXT",
-        "email": "TEXT"
-    }
+u = User(name="Alice", email="alice@mail.com", age=22)
+u.save()
 
-a.register_model(User)
-a.register_model(Server)
+u.name = "eeeeeee"
+u.save()
 
-b:User = a.get(User, 2)
-print(b)
+print(u)            # <User {'id': 1, 'name': 'Alice', 'email': 'alice@mail.com', 'age': 22}>
+print(User.all())   # liste complète des utilisateurs
