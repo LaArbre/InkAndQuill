@@ -3,13 +3,10 @@ from .accorder import sql_to_python
 
 
 class DBManager:
-    """Gestionnaire global des modèles et de la base de données."""
-
     def __init__(self):
         self.db = Database()
 
     def register_class(self, model_class):
-        """Enregistre une classe de modèle et crée la table si besoin."""
         if self.db.table_exists(model_class.__name__):
             model_class._db = self.db
             return
@@ -17,13 +14,11 @@ class DBManager:
         self.db.create_table(model_class.__name__, model_class._columns)
 
     def create(self, model_class, **kwargs):
-        """Crée et sauvegarde un objet du modèle donné."""
         obj = model_class(**kwargs)
         obj.save()
         return obj
 
     def get(self, model_class, id):
-        """Récupère un objet par ID."""
         row = self.db.select(model_class.__name__, where={"id": id})
         if not row:
             return None

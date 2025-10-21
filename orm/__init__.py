@@ -1,4 +1,2 @@
-from .model import Model
+from .model import ParentModel as Model
 from .manager import manager
-
-__all__ = ["Model", "manager"]

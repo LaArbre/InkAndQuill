@@ -2,95 +2,105 @@ from .accorder import sql_to_python
 from .manager import manager
 
 
-class Model:
+class ParentModel:
     """
-    Classe de base pour tous les modèles ORM.
-    Chaque sous-classe représente une table SQL.
+    Représente une table SQL.
+    Chaque sous-classe définit simplement des attributs annotés :
+        class User(ParentModel):
+            name: "TEXT"
+            email: "TEXT"
+            age: "INTEGER"
     """
 
-    _db = None
+    _db = manager
     _columns = {}
+    _child_class = None
+
+    # -------------------- Configuration automatique --------------------
 
     def __init_subclass__(cls, **kwargs):
-        """
-        Appelé automatiquement quand une classe hérite de Model.
-        Enregistre la table correspondante dans la base.
-        """
         super().__init_subclass__(**kwargs)
 
-        # Récupération des colonnes déclarées dans la sous-classe
-        if not hasattr(cls, "__columns__"):
-            raise AttributeError(f"Le modèle {cls.__name__} doit définir un attribut __columns__")
+        annotations = getattr(cls, "__annotations__", {})
+        cls._columns = {k: v for k, v in annotations.items()}
 
-        # Ajout automatique d'une clé primaire
-        cls._columns = dict(cls.__columns__)
         if "id" not in cls._columns:
             cls._columns["id"] = "INTEGER PRIMARY KEY AUTOINCREMENT"
 
-        # Enregistrement auprès du manager
-        manager.register_class(cls)
+        cls._child_class = type(
+            f"_{cls.__name__}Row",
+            (ChildModel,),
+            {"_parent": cls, "_columns": cls._columns}
+        )
 
-    def __init__(self, **kwargs):
-        """Initialise un objet Model (soit depuis la base, soit en mémoire)."""
-        self._db = self.__class__._db
+        cls._db.register_class(cls)
 
-        # Si une ligne correspondante existe déjà → la charger
-        if "id" in kwargs:
-            row = self._db.select(self.__class__.__name__, where={"id": kwargs["id"]})
-            if row:
-                for col, val in zip(self._columns.keys(), row[0]):
-                    setattr(self, col, sql_to_python(val, self._columns[col]))
-                return
+    # -------------------- Méthodes principales --------------------
 
-        # Sinon → nouvelle instance
-        for col in self._columns:
-            setattr(self, col, kwargs.get(col, None))
+    @classmethod
+    def new(cls, **kwargs):
+        """Crée une nouvelle ligne et l’enregistre en base"""
+        if not cls._db:
+            raise ValueError(f"{cls.__name__} n'est pas lié à un gestionnaire de base de données.")
 
-    # -------------------- CRUD --------------------
+        # Données valides (sans l'id)
+        data = {k: v for k, v in kwargs.items() if k in cls._columns and k != "id"}
+        new_id = cls._db.insert(cls.__name__, data, cls._columns)
 
-    def save(self):
-        """Sauvegarde l'objet en base de données."""
-        if not self._db:
-            raise ValueError("Model non enregistré auprès d'un DBManager")
-
-        data = {c: getattr(self, c) for c in self._columns if getattr(self, c, None) is not None}
-        data_without_id = {k: v for k, v in data.items() if k != "id"}
-
-        if not data_without_id:
-            raise ValueError("Aucune donnée à sauvegarder")
-
-        if getattr(self, "id", None):
-            self._db.update(self.__class__.__name__, data, {"id": self.id}, self._columns)
-        else:
-            self.id = self._db.insert(self.__class__.__name__, data_without_id, self._columns)
-
-    def delete(self):
-        """Supprime l'objet de la base de données."""
-        if not self._db:
-            raise ValueError("Model non enregistré auprès d'un DBManager")
-        if not getattr(self, "id", None):
-            raise ValueError("Objet non enregistré")
-
-        self._db.delete(self.__class__.__name__, {"id": self.id})
-        self.id = None
-
-    # -------------------- Utilitaires --------------------
+        # Crée une instance enfant liée
+        return cls._child_class(id=new_id, **kwargs)
 
     @classmethod
     def get(cls, **where):
-        """Récupère un objet par condition."""
-        row = cls._db.select(cls.__name__, where=where)
-        if not row:
+        """Récupère une ligne selon une condition"""
+        rows = cls._db.select(cls.__name__, where=where)
+        if not rows:
             return None
-        data = dict(zip(cls._columns.keys(), row[0]))
-        return cls(**data)
+
+        data = dict(zip(cls._columns.keys(), rows[0]))
+        return cls._child_class(**data)
 
     @classmethod
     def all(cls):
-        """Récupère tous les enregistrements."""
+        """Retourne toutes les lignes sous forme d'objets"""
         rows = cls._db.select(cls.__name__)
-        return [cls(**dict(zip(cls._columns.keys(), r))) for r in rows]
+        return [cls._child_class(**dict(zip(cls._columns.keys(), row))) for row in rows]
+
+    @classmethod
+    def delete(cls, **where):
+        """Supprime les lignes correspondant à une condition"""
+        cls._db.delete(cls.__name__, where)
+
+
+class ChildModel:
+    """
+    Représente une seule ligne d’un ParentModel.
+    N’a jamais accès directement au gestionnaire : tout passe par le parent.
+    """
+
+    _parent = None
+    _columns = {}
+
+    def __init__(self, **kwargs):
+        for col in self._columns:
+            setattr(self, col, kwargs.get(col, None))
+
+    def save(self):
+        """Met à jour la ligne en base via le parent."""
+        db = self._parent._db
+        if not getattr(self, "id", None):
+            raise ValueError("Impossible de sauvegarder : aucun ID.")
+        data = {c: getattr(self, c) for c in self._columns if c != "id"}
+        db.update(self._parent.__name__, data, {"id": self.id}, self._columns)
+
+    def delete(self):
+        """Supprime cette ligne de la base."""
+        db = self._parent._db
+        if not getattr(self, "id", None):
+            raise ValueError("Impossible de supprimer : aucun ID.")
+        db.delete(self._parent.__name__, {"id": self.id})
+        self.id = None
 
     def __repr__(self):
         cols = {c: getattr(self, c, None) for c in self._columns}
-        return f"<{self.__class__.__name__} {cols}>"
+        return f"<{self._parent.__name__}Row {cols}>"
