@@ -1,33 +1,43 @@
+# example.py
 from orm import *
+from datetime import datetime
 
-# --- Définition d’un modèle ---
+# ------------------ Définition de la table ------------------
 class User(Model):
-    name: "TEXT"
-    email: "TEXT"
-    age: "INTEGER"
+    name = TEXT
+    age = INTEGER
+    is_admin = BOOLEAN
+    created_at = DATETIME
 
-
-class Server(Model):
-    name: "TEXT"
-    token: "INTEGER"
-
-# --- Création d’une ligne ---
-alice = User.new(name="Alice", email="alice@example.com", age=25)
+# ------------------ Test de création ------------------
+print("=== Création ===")
+alice = User.new(name="Alice", age=25, is_admin=False, created_at=datetime.now())
+bob = User.new(name="Bob", age=30, is_admin=True, created_at=datetime.now())
 print(alice)
-
-q = Server.new(name= "ooo", token= 123)
-# <UserRow {'id': 1, 'name': 'Alice', 'email': 'alice@example.com', 'age': 25}>
-
-# --- Mise à jour ---
-alice.age = 26
-alice.save()
-
-# --- Lecture ---
-bob = User.get(name="Bob")
 print(bob)
 
-# --- Suppression ---
+# ------------------ Test de lecture ------------------
+print("\n=== Lecture ===")
+u = User.get(id=alice.id)
+print(u)
 
-# --- Tous les utilisateurs ---
-for u in Server.all():
-    print(u)
+# ------------------ Test de liste complète ------------------
+print("\n=== Tous les utilisateurs ===")
+users = User.all()
+for user in users:
+    print(user)
+
+# ------------------ Test de modification ------------------
+print("\n=== Modification ===")
+alice.age = 26
+alice.is_admin = True
+alice.save()
+updated = User.get(id=alice.id)
+print(updated)
+
+# ------------------ Test de suppression ------------------
+print("\n=== Suppression ===")
+bob.delete()
+all_users = User.all()
+for user in all_users:
+    print(user)

@@ -1,10 +1,9 @@
+# database.py
 import sqlite3
 import pymysql
 import json
 import os
 from datetime import datetime
-from .accorder import python_to_sql
-
 
 def record_history(log, table_name, action, keys, values):
     log["cursor"].execute("""
@@ -57,23 +56,21 @@ class Database:
 
     # --------------------- CRUD ---------------------
     def insert(self, table_name, data: dict, columns_type: dict):
-        sql_data = {k: python_to_sql(v, columns_type[k]) for k, v in data.items()}
-        keys = ", ".join([f'"{k}"' for k in sql_data])
-        placeholders = ", ".join([self.placeholder] * len(sql_data))
+        keys = ", ".join([f'"{k}"' for k in data])
+        placeholders = ", ".join([self.placeholder] * len(data))
         query = f'INSERT INTO "{table_name}" ({keys}) VALUES ({placeholders})'
-        self.data["cursor"].execute(query, tuple(sql_data.values()))
+        self.data["cursor"].execute(query, tuple(data.values()))
         self.data["connect"].commit()
-        record_history(self.log, table_name, "INSERT", list(sql_data.keys()), sql_data)
+        record_history(self.log, table_name, "INSERT", list(data.keys()), data)
         return self.data["cursor"].lastrowid
 
     def update(self, table_name, data: dict, where: dict, columns_type: dict):
-        sql_data = {k: python_to_sql(v, columns_type[k]) for k, v in data.items()}
-        set_clause = ", ".join([f'"{k}" = {self.placeholder}' for k in sql_data])
+        set_clause = ", ".join([f'"{k}" = {self.placeholder}' for k in data])
         where_clause = " AND ".join([f'"{k}" = {self.placeholder}' for k in where])
         query = f'UPDATE "{table_name}" SET {set_clause} WHERE {where_clause}'
-        self.data["cursor"].execute(query, tuple(sql_data.values()) + tuple(where.values()))
+        self.data["cursor"].execute(query, tuple(data.values()) + tuple(where.values()))
         self.data["connect"].commit()
-        record_history(self.log, table_name, "UPDATE", list(sql_data.keys()), sql_data)
+        record_history(self.log, table_name, "UPDATE", list(data.keys()), data)
 
     def delete(self, table_name, where: dict):
         where_clause = " AND ".join([f'"{k}" = {self.placeholder}' for k in where])
@@ -95,6 +92,7 @@ class Database:
         return self.data["cursor"].fetchall()
 
     def create_table(self, table_name, columns: dict):
+        # columns : dict {name: sql_type_string}
         col_defs = [f'"{col}" {typ}' for col, typ in columns.items()]
         query = f'CREATE TABLE IF NOT EXISTS "{table_name}" ({", ".join(col_defs)})'
         self.data["cursor"].execute(query)
