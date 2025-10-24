@@ -1,100 +1,119 @@
-from .manager import manager
-from .sqltypes import *
+# model.py
+from .database import database
+from .sqltypes import ForeignKey, INTEGER
+
 class ParentModel:
-    _db = manager
+    _db = database
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
 
-        # Récupère toutes les colonnes SQL
-        columns = {}
-        for name, value in cls.__dict__.items():
-            if name.startswith("_"):
-                continue
-            # Si c'est une classe SQLType, instancie-la
-            if isinstance(value, type) and issubclass(value, SQLType):
-                columns[name] = value()
-            # Si c'est déjà une instance SQLType
-            elif isinstance(value, SQLType):
-                columns[name] = value
+        columns = {
+            name: value
+            for name, value in cls.__dict__.items()
+            if hasattr(value, "sql_definition")
+        }
 
-        # Ajoute la clé primaire si manquante
-        if "id" not in columns:
-            col_id = INTEGER()
-            col_id.sql_name = "INTEGER PRIMARY KEY AUTOINCREMENT"
-            columns["id"] = col_id
-
+        columns["id"] = INTEGER(primary_key=True)
         cls._columns = columns
 
-        # Crée la classe enfant (ligne)
         cls._child_class = type(
             f"_{cls.__name__}Row",
             (ChildModel,),
             {"_parent": cls, "_columns": cls._columns}
         )
 
-        # Enregistre la table dans la base
+        # Création de la table
+        columns_sql = {name: col.sql_definition(name) for name, col in cls._columns.items()}
         cls._db.register_class(cls)
+        cls._db.create_table(cls.__name__, columns_sql)
 
-    # ------------------ Méthodes principales ------------------
     @classmethod
     def new(cls, **kwargs):
-        """Crée une nouvelle ligne et l’enregistre en base"""
         data = {}
-        for k, v in kwargs.items():
-            if k not in cls._columns or k == "id":
-                continue
-            col = cls._columns[k]
-            if not col.validate(v):
-                raise TypeError(f"Colonne '{k}' attend {col.sql_name}, pas {type(v).__name__}")
-            data[k] = col.to_sql(v)
+        for k, col in cls._columns.items():
+            if k == "id":
+                raise
+            value = kwargs.get(k, None)
+            if value is None:
+                if callable(col.default):
+                    value = col.default()
+                else:
+                    value = col.default
+            if not col.validate(value):
+                raise TypeError(f"Colonne '{k}' attend {col.sql_name}, pas {type(value).__name__}")
+            data[k] = col.to_sql(value)
 
-        if not data:
-            raise ValueError(f"Aucune colonne valide fournie pour {cls.__name__}")
+        data["id"] = cls._db.insert(cls.__name__, data, cls._columns)
 
-        # Insertion dans la base
-        new_id = cls._db.insert(cls.__name__, data, cls._columns)
-
-        # Récupère les valeurs converties depuis SQL pour l'objet final
+        # Convertit les valeurs en objets Python
         for k, v in data.items():
-            data[k] = cls._columns[k].from_sql(v)
-        data["id"] = new_id
+            col = cls._columns[k]
+            if isinstance(col, ForeignKey):
+                if isinstance(kwargs.get(k), col.model_class._child_class):
+                    data[k] = kwargs.get(k)
+                else:
+                    data[k] = col.from_sql(v)
+            else:
+                data[k] = col.from_sql(v)
 
         return cls._child_class(**data)
 
     @classmethod
     def get(cls, **where):
-        """Récupère une ligne selon une condition"""
         rows = cls._db.select(cls.__name__, where=where)
         if not rows:
             return None
-        data = {k: cls._columns[k].from_sql(v) for k, v in zip(cls._columns.keys(), rows[0])}
+        data = dict(zip(cls._columns.keys(), rows[0]))
+        for k, v in data.items():
+            col = cls._columns[k]
+            if isinstance(col, ForeignKey):
+                data[k] = col.from_sql(v)
+            else:
+                data[k] = col.from_sql(v)
         return cls._child_class(**data)
 
     @classmethod
     def all(cls):
-        """Retourne toutes les lignes sous forme d'objets"""
         rows = cls._db.select(cls.__name__)
         result = []
         for row in rows:
-            data = {k: cls._columns[k].from_sql(v) for k, v in zip(cls._columns.keys(), row)}
+            data = dict(zip(cls._columns.keys(), row))
+            for k, v in data.items():
+                col = cls._columns[k]
+                if isinstance(col, ForeignKey):
+                    data[k] = col.from_sql(v)
+                else:
+                    data[k] = col.from_sql(v)
             result.append(cls._child_class(**data))
         return result
 
     @classmethod
     def delete(cls, **where):
-        """Supprime les lignes correspondant à une condition"""
         cls._db.delete(cls.__name__, where)
 
 
-# ----------------------- Child Model -----------------------
 class ChildModel:
     _parent = None
     _columns = {}
 
     def __init__(self, **kwargs):
-        for col in self._columns:
-            setattr(self, col, kwargs.get(col, None))
+        for col, value in kwargs.items():
+            object.__setattr__(self, col, value)
+
+    def __getattribute__(self, name):
+        val = object.__getattribute__(self, name)
+        columns = object.__getattribute__(self, "_columns")
+        col = columns.get(name)
+        if isinstance(col, ForeignKey):
+            if val is None:
+                return None
+            if isinstance(val, int):
+                obj = col.from_sql(val)
+                object.__setattr__(self, name, obj)
+                return obj
+            return val
+        return val
 
     def save(self):
         db = self._parent._db
@@ -102,9 +121,6 @@ class ChildModel:
             raise ValueError("Impossible de sauvegarder : aucun ID.")
         data = {c: self._columns[c].to_sql(getattr(self, c)) for c in self._columns if c != "id"}
         db.update(self._parent.__name__, data, {"id": self.id}, self._columns)
-        # Met à jour les valeurs locales depuis SQL
-        for k, v in data.items():
-            setattr(self, k, self._columns[k].from_sql(v))
 
     def delete(self):
         db = self._parent._db
@@ -112,9 +128,6 @@ class ChildModel:
             raise ValueError("Impossible de supprimer : aucun ID.")
         db.delete(self._parent.__name__, {"id": self.id})
         self.id = None
-
-    def to_dict(self):
-        return {c: getattr(self, c, None) for c in self._columns}
 
     def __repr__(self):
         cols = {c: getattr(self, c, None) for c in self._columns}

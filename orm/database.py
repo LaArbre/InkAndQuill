@@ -1,4 +1,3 @@
-# database.py
 import sqlite3
 import pymysql
 import json
@@ -54,14 +53,40 @@ class Database:
         """)
         self.log["connect"].commit()
 
+    # --------------------- TRUS ---------------------
+    def register_class(self, model_class):
+        if self.table_exists(model_class.__name__):
+            model_class._db = self
+            return
+        model_class._db = self
+        # On récupère le type SQL pour chaque colonne
+        columns_sql = {name: col.sql_name for name, col in model_class._columns.items()}
+        self.create_table(model_class.__name__, columns_sql)
+
+    def create_table(self, table_name, columns: dict):
+        # columns : dict {name: sql_type_string}
+        col_defs = [f'"{col}" {typ}' for col, typ in columns.items()]
+        query = f'CREATE TABLE IF NOT EXISTS "{table_name}" ({", ".join(col_defs)})'
+        self.data["cursor"].execute(query)
+        self.data["connect"].commit()
+
+    def table_exists(self, table_name):
+        query = "SELECT name FROM sqlite_master WHERE type='table' AND name=?"
+        self.data["cursor"].execute(query, (table_name,))
+        return self.data["cursor"].fetchone() is not None
+
+
     # --------------------- CRUD ---------------------
     def insert(self, table_name, data: dict, columns_type: dict):
-        keys = ", ".join([f'"{k}"' for k in data])
-        placeholders = ", ".join([self.placeholder] * len(data))
+        filtered_data = {k: v for k, v in data.items() if k != "id"}
+        keys = ", ".join([f'"{k}"' for k in filtered_data.keys()])
+        placeholders = ", ".join([self.placeholder] * len(filtered_data))
         query = f'INSERT INTO "{table_name}" ({keys}) VALUES ({placeholders})'
-        self.data["cursor"].execute(query, tuple(data.values()))
+
+        self.data["cursor"].execute(query, tuple(filtered_data.values()))
         self.data["connect"].commit()
-        record_history(self.log, table_name, "INSERT", list(data.keys()), data)
+
+        record_history(self.log, table_name, "INSERT", list(filtered_data.keys()), filtered_data)
         return self.data["cursor"].lastrowid
 
     def update(self, table_name, data: dict, where: dict, columns_type: dict):
@@ -91,18 +116,8 @@ class Database:
         self.data["cursor"].execute(query, params)
         return self.data["cursor"].fetchall()
 
-    def create_table(self, table_name, columns: dict):
-        # columns : dict {name: sql_type_string}
-        col_defs = [f'"{col}" {typ}' for col, typ in columns.items()]
-        query = f'CREATE TABLE IF NOT EXISTS "{table_name}" ({", ".join(col_defs)})'
-        self.data["cursor"].execute(query)
-        self.data["connect"].commit()
-
-    def table_exists(self, table_name):
-        query = "SELECT name FROM sqlite_master WHERE type='table' AND name=?"
-        self.data["cursor"].execute(query, (table_name,))
-        return self.data["cursor"].fetchone() is not None
-
     def close(self):
         self.data["connect"].close()
         self.log["connect"].close()
+
+database = Database()

@@ -2,42 +2,55 @@
 from orm import *
 from datetime import datetime
 
-# ------------------ Définition de la table ------------------
+# ---------------------------
+# Définition des modèles
+# ---------------------------
 class User(Model):
-    name = TEXT
-    age = INTEGER
-    is_admin = BOOLEAN
-    created_at = DATETIME
+    name = TEXT(not_null=True)
+    email = TEXT(default="inconnu@example.com")
 
-# ------------------ Test de création ------------------
-print("=== Création ===")
-alice = User.new(name="Alice", age=25, is_admin=False, created_at=datetime.now())
-bob = User.new(name="Bob", age=30, is_admin=True, created_at=datetime.now())
-print(alice)
-print(bob)
+class Server(Model):
+    name = TEXT(not_null=True)
+    owner = ForeignKey(User, not_null=True)
+    created_at = DATETIME(default=datetime.now)
 
-# ------------------ Test de lecture ------------------
-print("\n=== Lecture ===")
-u = User.get(id=alice.id)
-print(u)
+# ---------------------------
+# Tests ORM
+# ---------------------------
+def run_tests():
+    print("=== Création d'un utilisateur ===")
+    alice = User.new(name="Alice", email="alice@example.com")
+    bob = User.new(name="Bob")
+    print(alice)
+    print(bob)
 
-# ------------------ Test de liste complète ------------------
-print("\n=== Tous les utilisateurs ===")
-users = User.all()
-for user in users:
-    print(user)
+    print("\n=== Création de serveurs liés ===")
+    s1 = Server.new(name="Serveur1", owner=alice)
+    s2 = Server.new(name="Serveur2", owner=bob)
+    s3 = Server.new(name="Serveur3", owner=alice)
+    print(s1)
+    print(s2)
+    print(s3)
 
-# ------------------ Test de modification ------------------
-print("\n=== Modification ===")
-alice.age = 26
-alice.is_admin = True
-alice.save()
-updated = User.get(id=alice.id)
-print(updated)
+    print("\n=== Vérification des ForeignKey ===")
+    print(s1.owner.name)  # Alice
+    print(s2.owner.name)  # Bob
+    print(s3.owner.name)  # Alice
 
-# ------------------ Test de suppression ------------------
-print("\n=== Suppression ===")
-bob.delete()
-all_users = User.all()
-for user in all_users:
-    print(user)
+    print("\n=== Récupération de tous les serveurs ===")
+    servers = Server.all()
+    for srv in servers:
+        print(f"{srv.name} -> owner: {srv.owner.name}")
+
+    print("\n=== Modification d'un serveur ===")
+    s1.name = "Serveur1-Renamed"
+    s1.save()
+    srv = Server.get(id=s1.id)
+    print(srv)
+
+    print("\n=== Suppression d'un serveur ===")
+    s2.delete()
+    print("Serveurs restants :", Server.all())
+
+if __name__ == "__main__":
+    run_tests()
