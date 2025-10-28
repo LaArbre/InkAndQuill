@@ -19,7 +19,7 @@ def record_history(log, table_name, action, keys, values):
 
 
 class Database:
-    """Gestionnaire bas-niveau des requêtes SQL."""
+    """Gestionnaire bas-niveau des requêtes SQL"""
 
     def __init__(self):
         if os.getenv("DB_SQL", False):
@@ -56,17 +56,25 @@ class Database:
     # --------------------- TRUS ---------------------
     def register_class(self, model_class):
         if self.table_exists(model_class.__name__):
-            model_class._db = self
             return
-        model_class._db = self
+
         # On récupère le type SQL pour chaque colonne
         columns_sql = {name: col.sql_name for name, col in model_class._columns.items()}
         self.create_table(model_class.__name__, columns_sql)
 
-    def create_table(self, table_name, columns: dict):
-        # columns : dict {name: sql_type_string}
-        col_defs = [f'"{col}" {typ}' for col, typ in columns.items()]
+    def create_table(self, table_name: str, columns: dict):
+        """Crée une table SQLite à partir d'un dictionnaire de colonnes"""
+
+        # Étape 1 -> Vérifie si la table existe déjà
+        if self.table_exists(table_name):
+            return
+
+        # Étape 2 -> Génère la définition SQL de chaque colonne
+        col_defs = [typ.sql_definition(col) for col, typ in columns.items()]
+
+        # Étape 3 -> Construit et exécute la requête SQL
         query = f'CREATE TABLE IF NOT EXISTS "{table_name}" ({", ".join(col_defs)})'
+
         self.data["cursor"].execute(query)
         self.data["connect"].commit()
 
@@ -77,11 +85,12 @@ class Database:
 
 
     # --------------------- CRUD ---------------------
-    def insert(self, table_name, data: dict, columns_type: dict):
+    def insert(self, table_name, data: dict):
         filtered_data = {k: v for k, v in data.items() if k != "id"}
-        keys = ", ".join([f'"{k}"' for k in filtered_data.keys()])
-        placeholders = ", ".join([self.placeholder] * len(filtered_data))
-        query = f'INSERT INTO "{table_name}" ({keys}) VALUES ({placeholders})'
+        keys = ", ".join(f'"{k}"' for k in filtered_data)
+        holder = ("?, "*len(filtered_data))[0:-2]
+
+        query = f'INSERT INTO "{table_name}" ({keys}) VALUES ({holder})'
 
         self.data["cursor"].execute(query, tuple(filtered_data.values()))
         self.data["connect"].commit()
@@ -89,12 +98,13 @@ class Database:
         record_history(self.log, table_name, "INSERT", list(filtered_data.keys()), filtered_data)
         return self.data["cursor"].lastrowid
 
-    def update(self, table_name, data: dict, where: dict, columns_type: dict):
+    def update(self, table_name, data: dict, where: dict):
         set_clause = ", ".join([f'"{k}" = {self.placeholder}' for k in data])
         where_clause = " AND ".join([f'"{k}" = {self.placeholder}' for k in where])
         query = f'UPDATE "{table_name}" SET {set_clause} WHERE {where_clause}'
         self.data["cursor"].execute(query, tuple(data.values()) + tuple(where.values()))
         self.data["connect"].commit()
+
         record_history(self.log, table_name, "UPDATE", list(data.keys()), data)
 
     def delete(self, table_name, where: dict):
@@ -119,5 +129,3 @@ class Database:
     def close(self):
         self.data["connect"].close()
         self.log["connect"].close()
-
-database = Database()

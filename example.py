@@ -3,21 +3,23 @@ from orm import *
 from datetime import datetime
 
 # ---------------------------
-# Définition des modèles
+#   Définition des modèles
 # ---------------------------
 class User(Model):
+    id = INTEGER(primary_key=True)
     name = TEXT(not_null=True)
     email = TEXT(default="inconnu@example.com")
 
 class Server(Model):
+    id = INTEGER(primary_key=True)
     name = TEXT(not_null=True)
     owner = ForeignKey(User, not_null=True)
     created_at = DATETIME(default=datetime.now)
 
 # ---------------------------
-# Tests ORM
+#         Tests ORM
 # ---------------------------
-def run_tests():
+def test():
     print("=== Création d'un utilisateur ===")
     alice = User.new(name="Alice", email="alice@example.com")
     bob = User.new(name="Bob")
@@ -33,9 +35,9 @@ def run_tests():
     print(s3)
 
     print("\n=== Vérification des ForeignKey ===")
-    print(s1.owner.name)  # Alice
-    print(s2.owner.name)  # Bob
-    print(s3.owner.name)  # Alice
+    print(s1.owner.name)  # C'est Alice
+    print(s2.owner.name)  # C'est Bob
+    print(s3.owner.name)  # C'est Alice
 
     print("\n=== Récupération de tous les serveurs ===")
     servers = Server.all()
@@ -53,4 +55,4 @@ def run_tests():
     print("Serveurs restants :", Server.all())
 
 if __name__ == "__main__":
-    run_tests()
+    test()
